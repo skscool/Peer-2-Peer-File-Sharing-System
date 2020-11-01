@@ -50,6 +50,14 @@ map<int, single_group*> group_info;
 //the thread function
 void *connection_handler(void *);
  
+
+/*
+Tracker program
+1. keep listening on port 8888 (hardcoded) for incoming commands from peer-clients. (NOTE : A peer-server never contacts the tracker)
+2. cater each connection request from distinct peer-clients on seperate threads. ACCEPT FN CALL -> NEW THREAD
+3. execute input commands from client in a infinite loop.
+*/
+ 
 int main(int argc , char *argv[])
 {
     int socket_desc , client_sock , c;
@@ -475,6 +483,7 @@ string leave_group(vector<string> args){
 	status = "Error : user does not belong to this group! (user's group_id = " + to_string(abs(client_group_status)) + ")";
 	return status;	
 }
+
 
 
 //extract command, then arguments (in vector) from client message. call fn to exucute those.
