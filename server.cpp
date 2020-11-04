@@ -17,6 +17,7 @@
 #include <sys/socket.h> 
 #include <arpa/inet.h> 
 #include <unistd.h> 
+#include <fstream>
 #define PORT 8888
 
 using namespace std;
@@ -24,18 +25,36 @@ using namespace std;
 struct single_user{
     string password;
     bool is_login;
-    int group_id;
+    set<int> group_id;
     single_user(string pass){
         password = pass;
         is_login = false;
-        group_id = 0;
     }
 };
+
+
+
+struct single_file{
+	string file_path;
+	string owner_id;
+	int owner_port;
+	int file_size;
+	bool is_being_shared;
+	single_file(string f, string o, int p, int s){
+		file_path = f;
+		owner_id = o;
+		owner_port = p;
+		file_size = s;
+		is_being_shared = true;
+	}
+};
+
 
 struct single_group{
     set<string> pending_id;
     set<string> member_id;
     string admin_id;
+    map<string, single_file*> file_info;
     single_group(string admin){
         admin_id = admin;
         member_id.insert(admin);
@@ -43,9 +62,11 @@ struct single_group{
 };
 
 
+
 //golbal vars
 map<string, single_user*> user_info;
 map<int, single_group*> group_info;
+
 
 //the thread function
 void *connection_handler(void *);
@@ -58,15 +79,34 @@ Tracker program
 3. execute input commands from client in a infinite loop.
 */
  
+//initialize a few dummy users = 1 and 2, a group 1, and 2 uploaded files in group 1 named d and copy.cpp with seeder port as 6666.
+//must login first to access these dummy data
+void init(){
+	user_info["1"] = new single_user("1");
+	user_info["1"]->group_id.insert(1);
+	group_info[1] = new single_group("1");
+	(group_info[1]->file_info)["sandbox.cpp"] = new single_file("/home/satyam/sandbox.cpp", "1", 6666, 21267);
+	(group_info[1]->file_info)["copy.cpp"] = new single_file("copy.cpp", "1", 6666, 10890);
+	
+	user_info["2"] = new single_user("2");
+	user_info["1"]->group_id.insert(1);
+	(group_info[1]->member_id).insert("2");
+} 
+ 
+ 
 int main(int argc , char *argv[])
 {
+
+	init();		//insert some dummy data for testing
+	
+	
     int socket_desc , client_sock , c;
     struct sockaddr_in server , client;
     int opt =1;
     //Create socket
     socket_desc = socket(AF_INET , SOCK_STREAM , 0);
-    if (socket_desc == -1)
-    {
+    
+    if (socket_desc == -1){
         printf("Server-log : Could not create socket");
     }
     puts("Server-log : Socket created");
@@ -82,8 +122,7 @@ int main(int argc , char *argv[])
     server.sin_port = htons( 8888 );
      
     //Bind
-    if( bind(socket_desc,(struct sockaddr *)&server , sizeof(server)) < 0)
-    {
+    if( bind(socket_desc,(struct sockaddr *)&server , sizeof(server)) < 0){
         //print the error message
         perror("Server-log : Bind failed. Error");
         return 1;
@@ -239,19 +278,19 @@ string create_group(vector<string> args){
     //     return status;
     // }
     
-    if(user_itr->second->group_id > 0){
-        status = "can't participate in multiple groups! (TIP: leave group_id " + to_string(user_itr->second->group_id) +")";
-        return status;
-    }
+    //if(user_itr->second->group_id > 0){
+    //    status = "can't participate in multiple groups! (TIP: leave group_id " + to_string(user_itr->second->group_id) +")";
+    //   return status;
+    //}
     
-    if(user_itr->second->group_id < 0){
-        status = "request pending with another group! (TIP: leave group_id " + to_string(-(user_itr->second->group_id)) +")";
-        return status;
-    }
+    //if(user_itr->second->group_id < 0){
+    //    status = "request pending with another group! (TIP: leave group_id " + to_string(-(user_itr->second->group_id)) +")";
+    //    return status;
+    //}
         
     cout<<"group id : "<<group_id<<endl;
     group_info[group_id] = new single_group(user_id);
-    user_itr->second->group_id = group_id;
+    (user_itr->second->group_id).insert(group_id);
     return status;
 }
 
@@ -325,7 +364,6 @@ joining process ->
 join : 1) set user_info->group_id as -ve of group_id where it's request is pending
        2) update pending_id in group_info 
 */
-
 string join_group(vector<string> args){
     //int len = args.size();
     string status = "success : request pending with admin!";
@@ -346,20 +384,23 @@ string join_group(vector<string> args){
     string user_id = args[1];
     auto user_itr = user_info.find(user_id);
     
-    int group_status = user_itr->second->group_id;
+    set<int> group_status = user_itr->second->group_id;
+    auto group_status_itr = group_status.find(group_id);
     
-    if(group_status > 0){
-        status = "Error : user_id " + user_id + " is already part of group_id " + to_string(group_status);
+	if(group_status_itr != group_status.end()){
+        status = "Error : user_id " + user_id + " is already part of group_id " + to_string(group_id);
         return status;
     }
     
-    if(group_status < 0){
-        status = "Error : join request for user_id " + user_id + " is already pending with group_id " + to_string(-group_status);
+	set<string> pending_status = group_itr->second->pending_id;
+	auto pending_itr = pending_status.find(user_id);
+    
+	if(pending_itr != pending_status.end()){
+        status = "Error : join request for user_id " + user_id + " is already pending with group_id " + to_string(group_id);
         return status;
     }
     
-    user_itr->second->group_id = -group_id;
-    group_itr->second->pending_id.insert(user_id);
+    (group_itr->second->pending_id).insert(user_id);
 }
 
 /*
@@ -393,26 +434,27 @@ string accept_request(vector<string> args){
         return status;
     }
     
-    int group_status = user_itr->second->group_id;
+    set<int> group_status = user_itr->second->group_id;
+    auto group_status_itr = group_status.find(group_id);
     
-    if(group_status > 0){
-        status = "Error : user_id " + user_id_accept + " is already part of group_id " + to_string(group_status);
+	if(group_status_itr != group_status.end()){
+        status = "Error : user_id " + user_id_accept + " is already part of group_id " + to_string(group_id);
         return status;
     }
     
-    if(group_status < 0){
-        if(group_status != (-group_id)){
-            status = "Error : join request for user_id " + user_id_accept + " is already pending with group_id " + to_string(-group_status);    
-            return status;
-        }
-        // else{
-        //  status = "Error : user is already member of this group";
-        // }
+    //if(group_status < 0){
+    //    if(group_status != (-group_id)){
+    //        status = "Error : join request for user_id " + user_id_accept + " is already pending with group_id " + to_string(-group_status);    
+    //       return status;
+    //    }
+    //    // else{
+    //    //  status = "Error : user is already member of this group";
+    //    // }
         
-    }
+    //}
     
     set<string> pending_reqs = group_itr->second->pending_id;
-    auto pending_itr = pending_reqs.find(user_id_accept);   //itr to original set
+    auto pending_itr = pending_reqs.find(user_id_accept);
     auto pending_itr_orig = (group_itr->second->pending_id).find(user_id_accept);   //itr to original set
     
     if(pending_itr == pending_reqs.end()){
@@ -428,7 +470,7 @@ string accept_request(vector<string> args){
     
     (group_itr->second->pending_id).erase(pending_itr_orig);
     (group_itr->second->member_id).insert(user_id_accept);
-    user_itr->second->group_id = group_id;
+    (user_itr->second->group_id).insert(group_id);
     return status;
 }
 
@@ -446,16 +488,17 @@ string leave_group(vector<string> args){
 		return status;
 	}
 	auto user_itr = user_info.find(client_user_id);
-	int client_group_status = user_itr->second->group_id;
+	set<int> client_group_status = user_itr->second->group_id;
 	
-	if(client_group_status == 0){
+	if(client_group_status.empty()){
 		status = "Error : user does not belong to any group!";
 		return status;
 	}
-		
-	if(client_group_status == group_id){							//---------user belong to group
+	
+	auto client_group_status_itr = client_group_status.find(group_id);
+	if(client_group_status_itr != client_group_status.end()){							//---------user belong to group
 		if(group_itr->second->admin_id == client_user_id){				//if user is admin
-			user_itr->second->group_id = 0;								//user disassociates itself in user_info
+			(user_itr->second->group_id).erase(group_id);				//user disassociates itself in user_info
 			(group_itr->second->member_id).erase(client_user_id);		//membership is cancelled in group_info
 			
 			auto member_itr = (group_itr->second->member_id).begin();
@@ -468,22 +511,140 @@ string leave_group(vector<string> args){
 			}
 			
 		}else{															//else user is just a member
-			user_itr->second->group_id = 0;
+			(user_itr->second->group_id).erase(group_id);
 			(group_itr->second->member_id).erase(client_user_id);
 		}
 		return status;
 	}
 	
-	if(client_group_status == -group_id){							//-----delete pending request if exists
-		user_itr->second->group_id = 0;
+	auto pending_status = (group_itr->second->pending_id);
+	auto pending_status_itr = pending_status.find(client_user_id);
+	if(pending_status_itr != pending_status.end()){							//-----delete pending request if exists
 		(group_itr->second->pending_id).erase(client_user_id);
 		return status;
 	}
 	
-	status = "Error : user does not belong to this group! (user's group_id = " + to_string(abs(client_group_status)) + ")";
+	status = "Error : user does not belong to this group!";
 	return status;	
 }
 
+/*
+extract info from command string and create a single entry in group_info->file_info
+all files are distinct in a group.
+*/
+string upload_file(vector<string> args){
+	string status = "success";
+	
+	string file_path = args[0];
+	int group_id = stoi(args[1]);
+	int peer_server_port = stoi(args[2]);
+	int file_size = stoi(args[3]);
+	string peer_user_id = args[4];
+	cout<<"Server-log : file_path "<<file_path<<" group_id " <<group_id<< " peer_server_port "<<peer_server_port<< " file_size "<<file_size<< " peer_user_id "<< peer_user_id;
+	
+	char temp[1500];
+	strcpy(temp, file_path.c_str());
+	char *temp2;
+	string file_name = string(strtok(temp, "/"));
+	while(temp2 = strtok(NULL, "/")){
+		file_name = string(temp2);
+	}
+	cout<<" file_name "<<file_name<<endl;
+	
+	auto group_itr = group_info.find(group_id);
+	if(group_itr == group_info.end()){
+		status = "Error : no such group_id";
+		return status;
+	}
+	
+	auto member_status = group_itr->second->member_id;
+	auto member_itr = member_status.find(peer_user_id);
+	if(member_itr == member_status.end()){
+		status = "Error : user is not member of this group!";
+		return status;
+	}
+	
+	auto file_status = group_itr->second->file_info;
+	auto file_itr = file_status.find(file_name);
+	/*if(file_itr != file_status.end()){
+		status = "Error : file already present in this group!";
+		return status;
+	}*/
+	
+	(group_itr->second->file_info)[file_name] = new single_file(file_path, peer_user_id, peer_server_port, file_size);
+}
+
+
+string list_files(vector<string> args){
+    //int len = args.size();
+    string status = "Files Available : ";
+    
+    // if(len < 2){
+    //     status = "Error : not logged in!";
+    //     return status;
+    // }
+    
+    int group_id = stoi(args[0]);
+    auto grp_itr = group_info.find(group_id);
+    
+    if(grp_itr == group_info.end()){
+        status = "Error : no such group_id!";
+        return status;
+    }   
+    
+    map<string, single_file*> file_info = grp_itr->second->file_info;
+    for(auto eachFile : file_info){
+        status += eachFile.first + ", ";
+    }
+
+    if(status.size() == 18){
+        status = "No files available!";
+        return status;
+    }
+    
+    return status;
+}
+
+//form the status string to be sent to the peer server waiting for file metadata PORT, FILE_SIZE, FILE_NAME, FILE_PATH
+string download_file(vector<string> args){
+	string status;
+	
+	int group_id = stoi(args[0]);
+	string file_name = args[1];
+	string destination_path = args[2];	//not of use here, it is path where client wants to save it's downloaded file
+	string file_path;
+	string client_user_id = args[3];
+	
+	auto group_itr = group_info.find(group_id);
+	if(group_itr == group_info.end()){
+		status = "Error : no such group_id!";
+		return status;
+	}
+	
+	auto member_status = group_itr->second->member_id;
+	auto member_itr = member_status.find(client_user_id);
+	if(member_itr == member_status.end()){
+		status = "Error : user is not member of the group_id " + to_string(group_id);
+		return status;
+	}
+	
+	auto file_status = group_itr->second->file_info;
+	auto file_itr = file_status.find(file_name);
+	if(file_itr == file_status.end()){
+		status = "Error : file is not shared in this group!";
+		return status;
+	}
+	
+	auto owner_itr = user_info.find(file_itr->second->owner_id);
+	if(owner_itr->second->is_login == false){
+		status = "Error : owner of the file is not logged in!";
+		return status;
+	}
+	
+	
+	//send owner port that has file, send file_size and file_name and file_path
+	status = to_string(file_itr->second->owner_port) + " " + to_string(file_itr->second->file_size) + " " +file_name + " " + file_itr->second->file_path;
+}
 
 
 //extract command, then arguments (in vector) from client message. call fn to exucute those.
@@ -532,6 +693,15 @@ string executeCmd(char *msgFromClient){
     else if(cmd == "leave_group"){
     	status = leave_group(args);
     }
+    else if(cmd == "upload_file"){
+    	status = upload_file(args);
+    }
+    else if(cmd == "list_files"){
+    	status = list_files(args);
+    }
+    else if(cmd == "download_file"){
+    	status = download_file(args);
+    }
     else{
         status = "Error : no such command!";
     }
@@ -575,35 +745,6 @@ void *connection_handler(void *socket_desc)
     }    
     
     puts("Server-log : Client disconnected");
-    
-    
-/*  
-    msgToSend = "Now type something and i shall repeat what you type \n";
-    write(sock , msgToSend , strlen(msgToSend));
-     
-    //Receive a message from client
-    while( (read_size = recv(sock , msgFromClient , 2000 , 0)) > 0 )
-    {
-        //end of string marker
-        msgFromClient[read_size] = '\0';
-        
-        //Send the message back to client
-        write(sock , msgFromClient , strlen(msgFromClient));
-        
-        //clear the message buffer
-        memset(msgFromClient, 0, 2000);
-    }
-     
-    if(read_size == 0)
-    {
-        puts("Client disconnected");
-        fflush(stdout);
-    }
-    else if(read_size == -1)
-    {
-        perror("recv failed");
-    }
-*/
-         
+             
     return 0;
 } 
